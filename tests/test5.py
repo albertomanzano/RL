@@ -1,7 +1,9 @@
+# Confirmation of appearence of frequencies in the circuit
+
 import sys
 sys.path.append("/home/alberto/RL/RL")
 import matplotlib
-matplotlib.use('TkAgg')
+#matplotlib.use('TkAgg')
 
 from agents.re_uploading_pqc import ReUploadingPQC
 from scipy.stats import qmc
@@ -11,87 +13,61 @@ import tensorflow_quantum as tfq
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
-def delta(tau,K,S,sigma,r):
-    d1 = 1/(sigma*np.sqrt(tau))*(np.log(S/K)+(r+sigma*sigma/2)*tau)
-    delta = ndtr(d1)
-    return delta
+def expansion(x,base_frequency,coeff):
+    number_frequencies = len(coeff)
+    number_points = len(x)
+    coeff = np.array(coeff)
+    conj_coeff = np.conjugate(coeff)
+    
+    values = np.ones(number_points)*(coeff[0] + conj_coeff[0])*0.5
+    for i in range(1,number_frequencies):
+        exponent = np.complex128(base_frequency * i * x * 1j)
+        values = values+coeff[i] * np.exp(exponent) + conj_coeff[i] * np.exp(-exponent)
+    values = np.real(values)
+    values = values/np.max(np.abs(values))
+    return values
+
+# Domain
+a = 0
+b = 2*np.pi
+N_points = 200
+x = np.linspace(a,b,N_points)
+domain = [[a,b]]
 
 # Define market space
-strike = 1
-r = 0.05
-volatility = 0.5
+base_frequency = 1
+A = [0]*6+[0.15+0.15j]
+y = expansion(x,base_frequency,A)
+print("Mean absolute error: ",np.mean(np.abs(y-np.mean(y))))
 
-# Load dataset
-dataset = tf.data.experimental.load("dataset2")
-x = []
-y = []
-for elements in dataset:
-    x.append(elements[0])
-    y.append(elements[1])
-x = tf.convert_to_tensor(x)
-y = tf.convert_to_tensor(y)
-
-# Shuffle indices
-indices = tf.range(start=0, limit=tf.shape(x)[0], dtype=tf.int32)
-shuffled_indices = tf.random.shuffle(indices)
-
-shuffled_x = tf.gather(x, shuffled_indices)
-shuffled_y = tf.gather(y, shuffled_indices)
-
-# Train and test split
-size = shuffled_x.shape[0]
-train_size = int(0.8*size)
-x_train = shuffled_x[0:train_size]
-y_train = shuffled_y[0:train_size]
-x_test = shuffled_x[train_size:]
-y_test = shuffled_y[train_size:]
-
-print("Data Loaded")
-
-# Define the associated circuit
-input_space = 2
-output_space = 1
-n_layers = 6
-model = ReUploadingPQC(input_space,output_space,n_layers)
-model.print_circuit()
-model.fit(x_train,y_train,x_test,y_test,epochs = 60)
-
-# Predict values 
-n = 10
-tau = np.linspace(1/252,1,n)
-s = np.linspace(0.1,3,n)
-
-# Compute exact
-inputs = np.array(np.meshgrid(tau,s)).T.reshape(-1,2)
-prediction = model(inputs)
-exact = np.array(delta(inputs[:,0],strike,inputs[:,1],volatility,r))
-prediction = prediction.numpy().reshape(len(tau),len(s))
-exact = exact.reshape(len(tau),len(s))
-absolute_error = np.abs(prediction-exact)
+# Arquitecture
+n_inputs = 1
+n_outputs = 1
+n_layers = 2
+schedule = 'rx_exp'
+entangling = 'cyclic'
+arquitecture = 'rot'
+repetitions = 1
 
 
-# Line plots
-minimum = min([np.min(exact),np.min(prediction),np.min(absolute_error)])
-maximum = min([np.max(exact),np.max(prediction),np.max(absolute_error)])
-extent = [np.min(tau),np.max(tau),np.min(s),np.max(s)]
-fig, ax = plt.subplots(1,3)
 
+# Initialization
+model = ReUploadingPQC(n_inputs,n_outputs,n_layers,schedule,entangling,arquitecture,repetitions)
+model.summary()
 
-ax[0].set_title('Prediction')
-im0 = ax[0].imshow(prediction,cmap = 'plasma',vmin = minimum,vmax = maximum,extent = extent)
-ax[0].set_xlabel("tau")
-ax[0].set_ylabel("s")
-ax[1].set_title('Exact')
-im1 = ax[1].imshow(exact,cmap = 'plasma',vmin = minimum, vmax = maximum,extent = extent)
-ax[1].set_xlabel("tau")
-ax[1].set_ylabel("s")
-ax[2].set_title('Absolute Error')
-im2 = ax[2].imshow(absolute_error,cmap = 'plasma',vmin = minimum, vmax = maximum, extent = extent)
-ax[2].set_xlabel("tau")
-ax[2].set_ylabel("s")
+# Train
+x_ = x.reshape((N_points,1))
+y_ = y.reshape((N_points,1))
+history = model.fit(x_,y_,epochs = 300,validation_split = 0.)
 
-fig.subplots_adjust(right=0.8)
+# Evaluate
+y_predict = model(x_)
 
-
-plt.colorbar(im2)
+plt.plot(x,y,label = "Original")
+plt.plot(x,y_predict,label = "Approximation")
+plt.ylim(-1, 1)
+plt.xlabel("x")
+plt.ylabel("y")
+plt.legend()
+plt.grid()
 plt.show()
