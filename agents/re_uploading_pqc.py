@@ -286,13 +286,11 @@ class ReUploadingPQC():
                         entangling: str = 'cyclic',
                         arquitecture: str = 'rxryrz',
                         repetitions: int = 1,
-                        domain = None):
+                        base_frequencies = None):
 
-        if domain is None:
-            a = tf.zeros([n_inputs,1])
-            b = tf.ones([n_inputs,1])*np.pi
-            domain = tf.concat([a,b], axis = 1)
-        self.domain = tf.constant(domain)
+        if base_frequencies is None:
+            self.base_frequencies = tf.ones([n_inputs,1],dtype=tf.dtypes.float32)
+        self.base_frequencies = tf.constant(base_frequencies,dtype=tf.dtypes.float32)
 
         # Define model
         input_tensor = tf.keras.Input(shape=(n_inputs, ), dtype=tf.dtypes.float32, name='input')
@@ -314,9 +312,7 @@ class ReUploadingPQC():
         self.circuit = re_uploading_pqc.circuit
 
     def encoding(self,x):
-        #pi = tf.constant(np.pi)
-        #output = pi/2*(x-self.domain[:,0])/(self.domain[:,1]-self.domain[:,0])
-        output = x
+        output = self.base_frequencies*x
         return output
 
     def decoding(self,x):
@@ -335,7 +331,8 @@ class ReUploadingPQC():
         else:
             n_frequencies = re_uploading_pqc_layer.n_layers
         
-        print("-----------------------------------------")
+        print("\n") 
+        print("##################################################")
         print("N inputs: ",re_uploading_pqc_layer.n_inputs)
         print("N outputs: ",re_uploading_pqc_layer.n_outputs)
         print("-----------------------------------------")
@@ -345,7 +342,8 @@ class ReUploadingPQC():
         print("-----------------------------------------")
         print("Schedule: ",re_uploading_pqc_layer.schedule)
         print("Number of frequencies: ",n_frequencies)
-        print("-----------------------------------------")
+        print("##################################################")
+        print("\n") 
         return None
     
     def fit(self,x,y,epochs = 2,validation_split = 0.2):

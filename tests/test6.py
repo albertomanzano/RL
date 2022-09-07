@@ -1,5 +1,5 @@
 ##################################################
-# Confirmation of appearence of frequencies in the circuit
+# Confirmation of base frequencies well implemented 
 ##################################################
 
 import os
@@ -39,16 +39,16 @@ x = np.linspace(a,b,N_points)
 domain = [[a,b]]
 
 # Define market space
-base_frequency = 1
-A = [0]*6+[0.15+0.15j]
+base_frequency = 2
+A = [0]*1+[0.15+0.15j]
 y = expansion(x,base_frequency,A)
 print("Reference Mean Absolute Error: ",np.mean(np.abs(y-np.mean(y))))
 
 # Arquitecture
 n_inputs = 1
 n_outputs = 1
-n_layers = 3
-schedule = 'rx_linear'
+n_layers = 1
+schedule = 'rx_constant'
 entangling = 'cyclic'
 arquitecture = 'rot'
 repetitions = 1
@@ -56,7 +56,7 @@ repetitions = 1
 
 
 # Initialization
-model = ReUploadingPQC(n_inputs,n_outputs,n_layers,schedule,entangling,arquitecture,repetitions)
+model = ReUploadingPQC(n_inputs,n_outputs,n_layers,schedule,entangling,arquitecture,repetitions,[base_frequency])
 model.summary()
 
 # Train
