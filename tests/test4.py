@@ -1,6 +1,6 @@
 # Test for ReUploadingPQC building
 import sys
-sys.path.append("/home/alberto/RL/RL")
+sys.path.append("./")
 
 from agents.re_uploading_pqc import ReUploadingPQC 
 import tensorflow as tf

@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import sys
-sys.path.append('/home/alberto/RL/RL')
+sys.path.append('./')
 
 
 from tf_agents.policies import random_py_policy

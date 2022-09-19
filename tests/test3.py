@@ -1,7 +1,7 @@
 # Test for data generation of BS-delta dpending on tau and s
 
 import sys
-sys.path.append("/home/alberto/RL/RL")
+sys.path.append("./")
 
 from agents.pqc import PQC
 from scipy.stats import qmc

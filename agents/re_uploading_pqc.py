@@ -290,7 +290,8 @@ class ReUploadingPQC():
 
         if base_frequencies is None:
             self.base_frequencies = tf.ones([n_inputs,1],dtype=tf.dtypes.float32)
-        self.base_frequencies = tf.constant(base_frequencies,dtype=tf.dtypes.float32)
+        else:
+            self.base_frequencies = tf.constant(base_frequencies,dtype=tf.dtypes.float32)
 
         # Define model
         input_tensor = tf.keras.Input(shape=(n_inputs, ), dtype=tf.dtypes.float32, name='input')
