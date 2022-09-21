@@ -5,4 +5,6 @@ tensorflow-quantum
 py-lets-be-rational
 matplotlib
 seaborn
-
+pennylane
+pennylane-lightning[gpu]
+cuquantum
