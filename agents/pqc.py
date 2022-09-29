@@ -1,9 +1,27 @@
 import pennylane as qml
 import matplotlib.pyplot as plt
-from pennylane.optimize import AdamOptimizer, GradientDescentOptimizer
-import jax.numpy as np
 import jax
+import jax.numpy as np
 import optax
+
+def mesh(foo, test_size = 0.0):
+    # Define shuffled mesh
+    coordinates = np.array(np.meshgrid(*foo)).T.reshape(-1, len(foo))
+    generator = jax.random.PRNGKey(0)
+    jax.random.permutation(generator,coordinates, independent = True)
+    # Divide in validation and training
+    train_index = int(len(coordinates)*(1.-test_size))
+    input_train = coordinates[:train_index]
+    input_test = coordinates[train_index:]
+    return input_train, input_test
+
+@jax.jit
+def MSE(y, y_pred): 
+    return np.sum(np.power(y-y_pred,2.0), axis = 0)/y.shape[0]
+
+@jax.jit
+def MAE(y, y_pred): 
+    return np.sum(np.abs(y-y_pred), axis = 0)/y.shape[0]
 
 class PQC:
 
@@ -11,8 +29,6 @@ class PQC:
         self.n_layers = n_layers
         self.n_inputs = n_inputs
         self.n_outputs = n_outputs
-        generator = jax.random.PRNGKey(0)
-        self.weights = jax.random.uniform(generator,(self.n_inputs+self.n_outputs,self.n_layers))
         
         #self.dev = qml.device("forest.qvm", device="{}q-pyqvm".format(n_inputs+n_outputs), shots = 1024)
         self.dev = qml.device(simulator, wires=self.n_inputs+self.n_outputs)
@@ -24,8 +40,14 @@ class PQC:
         # Batched functions
         self.call_map = jax.vmap(self.call,in_axes = (None,0), out_axes = 0)
 
-        # Training
+        # Compiling time
+        self.loss = None
+        self.metrics = None
         self.optimizer = None
+        self.opt_state = None
+        self.weights = None
+        self.metric_train_history = None
+        self.metric_test_history = None
 
 
     def arquitecture(self,weights,x):
@@ -70,13 +92,44 @@ class PQC:
         return solution
     
 
-    def compile(self,optimizer = None, loss = None, metrics = None, loss_weights = None):
+    def compile(self,optimizer = None, loss = None, metrics = None,mask = None, loss_weights = None, metric_weights = None):
+        
+        # Set weights
+        generator = jax.random.PRNGKey(0)
+        self.weights = jax.random.uniform(generator,(self.n_inputs+self.n_outputs,self.n_layers))
+        
+        # Optimizer
         if optimizer is None:
-            optimizer = AdamOptimizer(0.06, beta1=0.9, beta2=0.999) 
+            optimizer = optax.adam(0.01)
         self.optimizer = optimizer
+        self.opt_state = optimizer.init(self.weights)
 
-    def L2(self,y1,y2):
-        return np.power(y1-y2,2.0)
+        # Loss
+        if loss is None:
+            loss = MSE
+        self.loss = loss
+
+        # Metrics
+        if metrics is None:
+            metrics = {"MSE": MSE}
+        self.metrics = metrics
+
+        # Loss and metric weights
+        if loss_weights is None:
+            loss_weights = np.array([i for i in range(self.n_inputs+1)])
+        self.loss_weights = loss_weights
+
+        if metric_weights is None:
+            metric_weights = np.array([i for i in range(self.n_inputs+1)])
+        self.metric_weights = metric_weights
+
+        
+        # History
+        self.metric_train_history = []
+        self.metric_test_history = []
+        
+        return None
+
     
     def cost(self,weights,inputs, outputs,loss_weights):
         """Cost function to be minimized.
@@ -89,11 +142,36 @@ class PQC:
             float: loss value to be minimized
         """
         # Compute prediction for each input in data batch
-        loss = 0.0
         pred   = self.call_map(weights,inputs)
-        loss_i = np.sum(self.L2(outputs,pred), axis = 0)/inputs.shape[0]
-        loss = np.dot(loss_weights,loss_i)
-        return loss
+        loss_i = self.loss(outputs,pred)
+        return np.dot(loss_weights,loss_i)
+
+    def compute_metrics(self,x,y,lista):
+        y_pred = self.call_map(self.weights,x)
+
+        title = [ '{0: <25}'.format(str(i)) for i in range(y.shape[1]) ]
+        underline = [ '{0: <25}'.format("-"*25) for i in range(y.shape[1]) ]
+        title = ''.join(title)
+        underline = ''.join(underline)
+        print('{0: <25}'.format(" ")+title)
+        print('{0: <25}'.format(" ")+underline)
+
+        epoch_list = []
+        for name, metric in self.metrics.items():
+            metric_list = []
+            metric_string = []
+            for j in range(y_pred.shape[1]):
+                result = metric(y[:,j],y_pred[:,j])
+                metric_list.append(result)
+                metric_string.append('{0: <25}'.format(str(result)))
+
+            print('{0: <25}'.format(name)+''.join(metric_string))
+            epoch_list.append(metric_list)
+
+        print("\n")
+        lista.append(epoch_list)
+
+        return None
      
 
     def minibatch(self,inputs,targets,batch_size):
@@ -116,96 +194,39 @@ class PQC:
     def predict(self,inputs):
         return self.call_map(self.weights,inputs)
         
-    def fit(self,x_train,y_train,x_test = None,y_test = None, batch_size: int = 32, epochs: int = 30, validation_split = None, loss_weights = None, metric_weights = None):
+    def fit(self,x_train,y_train,x_test = None,y_test = None, epochs: int = 30, validation_split = None):
 
-        if loss_weights is None:
-            loss_weights = [i for i in range(self.n_inputs+1)]
+        energy = lambda x: self.cost(x,x_train,y_train,self.loss_weights) 
 
-        if metric_weights is None:
-            metric_weights = [i for i in range(self.n_inputs+1)]
+        # Metrics
+        print("Initial value: ")
+        print("#######################################################################")
+        print("Training: ")
+        self.compute_metrics(x_train,y_train,self.metric_train_history)
+        print("Test: ")
+        self.compute_metrics(x_test,y_test,self.metric_test_history)
+        print("#######################################################################")
 
-        loss_weights = np.array(loss_weights)
-        metric_weights = np.array(metric_weights)
-
-        
-        # Save training data 
-        loss_train_history = np.zeros(epochs+1)
-        metric_train_history = np.zeros(epochs+1)
-        loss_test_history = np.zeros(epochs+1)
-        metric_test_history = np.zeros(epochs+1)
-
-        # Define optimizer
-        learning_rate = 0.01
-        
-        # Train
-        y_train_pred  = self.call_map(self.weights,x_train) 
-        l2_train = np.sum(self.L2(y_train,y_train_pred),axis = 0)/x_train.shape[0]
-        
-        loss_train = np.dot(loss_weights,l2_train)
-        metric_train = np.dot(metric_weights,l2_train)
-        
-        loss_train_history.at[0].set(loss_train)
-        metric_train_history.at[0].set(metric_train)
-        
-        # Test
-        y_test_pred = self.call_map(self.weights,x_test)
-        l2_test = np.sum(self.L2(y_test,y_test_pred),axis = 0)/x_test.shape[0]
-            
-        loss_test = np.dot(loss_weights,l2_test) 
-        metric_test = np.dot(metric_weights,l2_test) 
-            
-        loss_test_history.at[0].set(loss_test)
-        metric_test_history.at[0].set(metric_test)
-            
-
-        optimizer = optax.adam(0.01)
-        opt_state = optimizer.init(self.weights)
-        energy = lambda x: self.cost(x,x_train,y_train,loss_weights) 
-        
-        print(f"Initial | L2 train: {l2_train} | Loss train: {loss_train} | Metric train: {metric_train} | L2 test: {l2_test} | Loss test: {loss_test} | Metric test: {metric_test}")
 
         for it in range(epochs):
             # Optimize
             grads = jax.grad(energy)(self.weights)
-            updates, opt_state = optimizer.update(grads, opt_state)
+            updates, self.opt_state = self.optimizer.update(grads, self.opt_state)
             self.weights = optax.apply_updates(self.weights, updates)
             
-            # Train
-            y_train_pred  = self.call_map(self.weights,x_train) 
-            l2_train = np.sum(self.L2(y_train,y_train_pred),axis = 0)/x_train.shape[0]
-        
-            loss_train = np.dot(loss_weights,l2_train)
-            metric_train = np.dot(metric_weights,l2_train)
+            # Metrics
+            print("Epoch: ", it)
+            print("#######################################################################")
+            print("Training: ")
+            self.compute_metrics(x_train,y_train,self.metric_train_history)
+            print("Test: ")
+            self.compute_metrics(x_test,y_test,self.metric_test_history)
+            print("#######################################################################")
             
-            loss_train_history.at[it+1].set(loss_train)
-            metric_train_history.at[it+1].set(metric_train)
-            
-            # Test
-            y_test_pred = self.call_map(self.weights,x_test)
-            l2_test = np.sum(self.L2(y_test,y_test_pred),axis = 0)/x_test.shape[0]
-            
-            loss_test = np.dot(loss_weights,l2_test) 
-            metric_test = np.dot(metric_weights,l2_test) 
-            
-            loss_test_history.at[it+1].set(loss_test)
-            metric_test_history.at[it+1].set(metric_test)
-        
-            print(f"Epoch: {it} | L2 train: {l2_train} | Loss train: {loss_train} | Metric train: {metric_train} | L2 test: {l2_test} | Loss test: {loss_test} | Metric test: {metric_test}")
-
-        return loss_train_history, loss_test_history, metric_train_history, metric_test_history
+        return np.array(self.metric_train_history), np.array(self.metric_test_history)
 
 
     def plot(self):
         print(qml.draw(self.circuit)(self.weights,[i for i in range(self.n_inputs+self.n_outputs)]))
         return None
 
-def mesh(foo, test_size = 0.0):
-    # Define shuffled mesh
-    coordinates = np.array(np.meshgrid(*foo)).T.reshape(-1, len(foo))
-    generator = jax.random.PRNGKey(0)
-    jax.random.permutation(generator,coordinates, independent = True)
-    # Divide in validation and training
-    train_index = int(len(coordinates)*(1.-test_size))
-    input_train = coordinates[:train_index]
-    input_test = coordinates[train_index:]
-    return input_train, input_test
