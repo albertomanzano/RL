@@ -131,7 +131,7 @@ class PQC:
         return None
 
     
-    def cost(self,weights,inputs, outputs,loss_weights):
+    def cost(self,y, y_pred,loss_weights):
         """Cost function to be minimized.
 
         Args:
@@ -142,8 +142,7 @@ class PQC:
             float: loss value to be minimized
         """
         # Compute prediction for each input in data batch
-        pred   = self.call_map(weights,inputs)
-        loss_i = self.loss(outputs,pred)
+        loss_i = self.loss(y,y_pred)
         return np.dot(loss_weights,loss_i)
 
     def compute_metrics(self,x,y,lista):
@@ -196,7 +195,8 @@ class PQC:
         
     def fit(self,x_train,y_train,x_test = None,y_test = None, epochs: int = 30, validation_split = None):
 
-        energy = lambda x: self.cost(x,x_train,y_train,self.loss_weights) 
+        energy = lambda x: self.cost(y_train, self.call_map(x,x_train),self.loss_weights) 
+        energy = jax.jit(energy)
 
         # Metrics
         print("Initial value: ")
