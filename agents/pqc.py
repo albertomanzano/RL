@@ -3,36 +3,42 @@ import matplotlib.pyplot as plt
 import jax
 import jax.numpy as np
 import optax
+from agents.losses import spvsd_loss
+from agents.metrics import MSE_metric
+import time
+import copy
 
 def mesh(foo, test_size = 0.0):
     # Define shuffled mesh
     coordinates = np.array(np.meshgrid(*foo)).T.reshape(-1, len(foo))
-    generator = jax.random.PRNGKey(0)
-    jax.random.permutation(generator,coordinates, independent = True)
+    generator = jax.random.PRNGKey(int(time.time()))
+    coordinates = jax.random.permutation(generator,coordinates, independent = True)
     # Divide in validation and training
     train_index = int(len(coordinates)*(1.-test_size))
     input_train = coordinates[:train_index]
     input_test = coordinates[train_index:]
     return input_train, input_test
 
-@jax.jit
-def MSE(y, y_pred): 
-    return np.sum(np.power(y-y_pred,2.0), axis = 0)/y.shape[0]
-
-@jax.jit
-def MAE(y, y_pred): 
-    return np.sum(np.abs(y-y_pred), axis = 0)/y.shape[0]
 
 class PQC:
 
-    def __init__(self,n_inputs: int = 1,n_outputs: int = 1,n_layers: int = 1, simulator: str = "default.qubit.jax"):
+    def __init__(self,n_inputs: int = 1,n_layers: int = 1, base_frequency = 1., simulator: str = "default.qubit.jax", arquitecture = "constant"):
+        # Structure of the network
         self.n_layers = n_layers
         self.n_inputs = n_inputs
-        self.n_outputs = n_outputs
+        self.base_frequency = base_frequency
         
-        #self.dev = qml.device("forest.qvm", device="{}q-pyqvm".format(n_inputs+n_outputs), shots = 1024)
-        self.dev = qml.device(simulator, wires=self.n_inputs+self.n_outputs)
+        # Arquitecture
+        if arquitecture=="linear_arquitecture":
+            print("Linear arquitecture")
+            self.arquitecture = self.linear_arquitecture
+        else:
+            self.arquitecture = self.constant_arquitecture
+        
+        # Main functions
+        self.dev = qml.device(simulator, wires=self.n_inputs)
         self.circuit = qml.QNode(self.arquitecture,self.dev,interface = "jax")
+        self.circuit_plot = copy.deepcopy(self.circuit)
         self.gradient_circuit = jax.grad(self.circuit,argnums = 1)
         self.circuit = jax.jit(self.circuit)
         self.gradient_circuit = jax.jit(self.gradient_circuit)
@@ -50,7 +56,7 @@ class PQC:
         self.metric_test_history = None
 
 
-    def arquitecture(self,weights,x):
+    def constant_arquitecture(self,weights,x):
         """A variational quantum circuit representing the Universal classifier.
 
         Args:
@@ -60,28 +66,59 @@ class PQC:
         Returns:
             float: fidelity between output state and input
         """
-        # Initialization
-        for i in range(self.n_inputs+self.n_outputs):
-            qml.Hadamard(wires = i)
 
         for l in range(self.n_layers):
             
             # Variational layer
-            for i in range(self.n_inputs+self.n_outputs):
-                qml.Rot(weights[i,l],weights[i,l],weights[i,l],wires=i)
+            for i in range(self.n_inputs):
+                qml.Hadamard(wires = i)
+                qml.RY(weights[i,l],wires=i)
+                #qml.RZ(weights[i,2,l],wires=i)
             
             # Encoding layer
             for i in range(self.n_inputs):
-                qml.Rot(x[i],x[i],x[i],wires=i)
+                qml.Hadamard(wires = i)
+                qml.RX(self.base_frequency*x[i],wires=i)
                 
             # Entangling layer
-            for i in range(self.n_inputs+self.n_outputs-1):
-                qml.CNOT(wires = [i,i+1])
-            qml.CNOT(wires = [self.n_inputs+self.n_outputs-1,0])
+            for i in range(self.n_inputs-1):
+                qml.SWAP(wires = [i,i+1])
 
         # Operator
-        #op = qml.prod(*[ qml.PauliX(wires = i) for i in range(self.n_inputs) ])
-        op = qml.PauliX(wires = self.n_inputs+self.n_outputs-1)
+        #op = qml.prod(*[ qml.PauliY(wires = i) for i in range(self.n_inputs) ])
+        op = qml.PauliY(wires = 0)
+        return qml.expval(op)
+    
+    def linear_arquitecture(self,weights,x):
+        """A variational quantum circuit representing the Universal classifier.
+
+        Args:
+            params (array[float]): array of parameters
+            x (array[float]): single input vector
+
+        Returns:
+            float: fidelity between output state and input
+        """
+
+        for l in range(self.n_layers):
+            
+            # Variational layer
+            for i in range(self.n_inputs):
+                qml.Hadamard(wires = i)
+                qml.RY(weights[i,l],wires=i)
+            
+            # Encoding layer
+            for i in range(self.n_inputs):
+                qml.Hadamard(wires = i)
+                qml.RX(self.base_frequency*(l+1)*x[i],wires=i)
+                
+            # Entangling layer
+            for i in range(self.n_inputs-1):
+                qml.SWAP(wires = [i,i+1])
+
+        # Operator
+        #op = qml.prod(*[ qml.PauliY(wires = i) for i in range(self.n_inputs) ])
+        op = qml.PauliY(wires = 0)
         return qml.expval(op)
 
     def call(self,weights,x):
@@ -92,36 +129,27 @@ class PQC:
         return solution
     
 
-    def compile(self,optimizer = None, loss = None, metrics = None,mask = None, loss_weights = None, metric_weights = None):
+    def compile(self,optimizer = None, loss = None, metrics = None,mask = None):
         
         # Set weights
-        generator = jax.random.PRNGKey(0)
-        self.weights = jax.random.uniform(generator,(self.n_inputs+self.n_outputs,self.n_layers))
+        generator = jax.random.PRNGKey(int(time.time()))
+        #self.weights = jax.random.uniform(generator,(self.n_inputs,3,self.n_layers))
+        self.weights = jax.random.uniform(generator,(self.n_inputs,self.n_layers))
         
         # Optimizer
         if optimizer is None:
-            optimizer = optax.adam(0.01)
+            optimizer = optax.adam(0.1)
         self.optimizer = optimizer
         self.opt_state = optimizer.init(self.weights)
 
-        # Loss
-        if loss is None:
-            loss = MSE
-        self.loss = loss
-
         # Metrics
         if metrics is None:
-            metrics = {"MSE": MSE}
+            metrics = {"MSE": MSE_metric}
         self.metrics = metrics
 
-        # Loss and metric weights
-        if loss_weights is None:
-            loss_weights = np.array([i for i in range(self.n_inputs+1)])
-        self.loss_weights = loss_weights
-
-        if metric_weights is None:
-            metric_weights = np.array([i for i in range(self.n_inputs+1)])
-        self.metric_weights = metric_weights
+        if loss is None:
+            loss = losses.spvsd_loss
+        self.loss = loss
 
         
         # History
@@ -131,19 +159,6 @@ class PQC:
         return None
 
     
-    def cost(self,y, y_pred,loss_weights):
-        """Cost function to be minimized.
-
-        Args:
-            x (array[float]): array of input vectors
-            y (array[float]): array of targets
-
-        Returns:
-            float: loss value to be minimized
-        """
-        # Compute prediction for each input in data batch
-        loss_i = self.loss(y,y_pred)
-        return np.dot(loss_weights,loss_i)
 
     def compute_metrics(self,x,y,lista):
         y_pred = self.call_map(self.weights,x)
@@ -195,7 +210,7 @@ class PQC:
         
     def fit(self,x_train,y_train,x_test = None,y_test = None, epochs: int = 30, validation_split = None):
 
-        energy = lambda x: self.cost(y_train, self.call_map(x,x_train),self.loss_weights) 
+        energy = lambda x: self.loss(self.call_map,x,x_train,y_train)
         energy = jax.jit(energy)
 
         # Metrics
@@ -227,6 +242,6 @@ class PQC:
 
 
     def plot(self):
-        print(qml.draw(self.circuit)(self.weights,[i for i in range(self.n_inputs+self.n_outputs)]))
+        print(qml.draw(self.circuit_plot)(self.weights,[i for i in range(self.n_inputs)]))
         return None
 

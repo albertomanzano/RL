@@ -38,3 +38,6 @@ from tf_agents.train.utils import spec_utils
 from tf_agents.train.utils import strategy_utils
 from tf_agents.train.utils import train_utils
 from tf_agents.environments import suite_gym
+
+import jax
+import optax
