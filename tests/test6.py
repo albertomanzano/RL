@@ -1,77 +1,118 @@
 ##################################################
-# Confirmation of base frequencies well implemented 
+# Comparison RNN with standard 
 ##################################################
 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import sys
 sys.path.append("./")
-import matplotlib
-#matplotlib.use('TkAgg')
-
-from agents.re_uploading_pqc import ReUploadingPQC
-from scipy.stats import qmc
-from scipy.special import ndtr
-import numpy as np
-import tensorflow_quantum as tfq
-import tensorflow as tf
 import matplotlib.pyplot as plt
+import numpy as np
 
-def expansion(x,base_frequency,coeff):
-    number_frequencies = len(coeff)
-    number_points = len(x)
-    coeff = np.array(coeff)
-    conj_coeff = np.conjugate(coeff)
-    
-    values = np.ones(number_points)*(coeff[0] + conj_coeff[0])*0.5
-    for i in range(1,number_frequencies):
-        exponent = np.complex128(base_frequency * i * x * 1j)
-        values = values+coeff[i] * np.exp(exponent) + conj_coeff[i] * np.exp(-exponent)
-    values = np.real(values)
-    values = values/np.max(np.abs(values))
-    return values
+from agents.losses import spvsd_gradients_loss, spvsd_loss
+import agents.pqc as pqc
 
-# Domain
-a = 0
-b = 2*np.pi
-N_points = 200
-x = np.linspace(a,b,N_points)
-domain = [[a,b]]
+# Define domain
+n = 100
+t0 = 0
+T = 1
+t = np.linspace(t0,T,n)
+dt = t[1]-t[0]
+x = t*t
 
-# Define market space
-base_frequency = 2
-A = [0]*1+[0.15+0.15j]
-y = expansion(x,base_frequency,A)
-print("Reference Mean Absolute Error: ",np.mean(np.abs(y-np.mean(y))))
 
-# Arquitecture
+###############################
+# RNN
+###############################
+base_frequency = 1.
 n_inputs = 1
-n_outputs = 1
-n_layers = 1
-schedule = 'rx_constant'
-entangling = 'cyclic'
-arquitecture = 'rot'
-repetitions = 1
+n_layers = 5
+loss = spvsd_loss
 
+re_uploading_pqc = pqc.PQC(n_inputs,n_layers, base_frequency)
+re_uploading_pqc.compile(loss = loss)
+re_uploading_pqc.plot()
 
+# Define dataset
+t_ = t.reshape((n,1))
+x_ = x.reshape((n,1))
 
-# Initialization
-model = ReUploadingPQC(n_inputs,n_outputs,n_layers,schedule,entangling,arquitecture,repetitions,[base_frequency])
-model.summary()
+inputs = x_[0:-1]
+outputs = x_[1:]
+# Execution
+metric_train_history, metric_test_history = re_uploading_pqc.fit(
+                            inputs,outputs,inputs,outputs,
+                            epochs = 200
+                            )
 
-# Train
-x_ = x.reshape((N_points,1))
-y_ = y.reshape((N_points,1))
-history = model.fit(x_,y_,epochs = 300,validation_split = 0.)
+temp = re_uploading_pqc.predict(inputs)
+x_RNN = np.zeros_like(t)
+x_RNN[0] = x[0]
+x_RNN[1:] = temp[:,0]
 
-# Evaluate
-y_predict = model(x_)
+###############################
+# MRNN
+###############################
+base_frequency = 1.
+n_inputs = 2
+n_layers = 5
+loss = spvsd_loss
 
-plt.plot(x,y,label = "Original")
-plt.plot(x,y_predict,label = "Approximation")
-plt.ylim(-1, 1)
-plt.xlabel("x")
-plt.ylabel("y")
+re_uploading_pqc = pqc.PQC(n_inputs,n_layers, base_frequency)
+re_uploading_pqc.compile(loss = loss)
+re_uploading_pqc.plot()
+
+# Define dataset
+t_ = t.reshape((n,1))
+x_ = x.reshape((n,1))
+
+inputs = np.concatenate((t_[0:-1],x_[0:-1]), axis = 1)
+outputs = x_[1:]
+# Execution
+metric_train_history, metric_test_history = re_uploading_pqc.fit(
+                            inputs,outputs,inputs,outputs,
+                            epochs = 200
+                            )
+
+temp = re_uploading_pqc.predict(inputs)
+x_MRNN = np.zeros_like(t)
+x_MRNN[0] = x[0]
+x_MRNN[1:] = temp[:,0]
+
+###############################
+# NN
+###############################
+base_frequency = 1.
+n_inputs = 1
+n_layers = 5
+loss = spvsd_loss
+
+re_uploading_pqc = pqc.PQC(n_inputs,n_layers, base_frequency)
+re_uploading_pqc.compile(loss = loss)
+re_uploading_pqc.plot()
+
+# Define dataset
+t_ = t.reshape((n,1))
+x_ = x.reshape((n,1))
+
+inputs = t_
+outputs = x_
+# Execution
+metric_train_history, metric_test_history = re_uploading_pqc.fit(
+                            inputs,outputs,inputs,outputs,
+                            epochs = 200
+                            )
+
+temp = re_uploading_pqc.predict(inputs)
+x_NN = temp[:,0]
+
+# Plot
+plt.plot(t,x, label = "Exact")
+plt.plot(t,x_RNN,label = "RNN")
+plt.plot(t,x_MRNN,label = "MRNN")
+plt.plot(t,x_NN,label = "NN")
+plt.xlabel("t")
+plt.ylabel("x")
 plt.legend()
 plt.grid()
 plt.show()

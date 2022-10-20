@@ -174,7 +174,7 @@ class PQC:
         for name, metric in self.metrics.items():
             metric_list = []
             metric_string = []
-            for j in range(y_pred.shape[1]):
+            for j in range(y.shape[1]):
                 result = metric(y[:,j],y_pred[:,j])
                 metric_list.append(result)
                 metric_string.append('{0: <25}'.format(str(result)))
