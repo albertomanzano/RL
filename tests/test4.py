@@ -6,46 +6,59 @@ import sys
 sys.path.append("./")
 sys.path.append("../")
 
-from jax import numpy as np
-import agents.pqc as pqc
-from agents.losses import spvsd_gradients_loss, spvsd_loss
+from jax import numpy as jnp
+import numpy as np
+import src.pqc as pqc
+from src.arquitectures import ConstantArquitecture, FourierAnsatz
+from src.losses import spvsd_gradients_loss, spvsd_loss
 import matplotlib.pyplot as plt
 
+def cos_expansion(x,z):
+    amplitude = np.abs(z)
+    phase = np.angle(z)
 
-def expansion(x,base_frequency,coeff):
-    number_frequencies = len(coeff)
-    number_points = len(x)
-    
-    values = np.ones(number_points)*coeff[0]
-    for i in range(1,number_frequencies):
-        values = values+coeff[i]*np.sin(base_frequency*i*x)
-    return values
+    N = len(z)
+    result = np.ones_like(x)*amplitude[0]*np.cos(phase[0])/2
+    for i in range(1,N):
+        result = result+amplitude[i]*np.cos(i*x+phase[i])
+    return result
 
-# Domain
-a = 0
-b = 2*np.pi
-N_points = 200
-x = np.linspace(a,b,N_points)
-domain = [[a,b]]
+
+
+n = 3
+N = 2**n
+
+
+amplitude = np.random.randn(2**n)
+amplitude[0] = 0
+amplitude = amplitude/np.sqrt(np.sum(np.square(amplitude)))
+phase = np.random.randn(2**n)
+phase[0] = 0
+z = amplitude*np.exp(1j*phase)
+
 
 # Define market space
-base_frequency = 1.
-A =[0]*10+[0.3]
-y = expansion(x,base_frequency,A)
+N_points = 100
+x = np.linspace(0,1,N_points)
+y = cos_expansion(x,z)
 
 # Test 1
+n_qubits = n
 n_inputs = 1
-n_layers = 4
-loss = spvsd_loss
+n_layers = 1
 
-re_uploading_pqc = pqc.PQC(n_inputs,n_layers, base_frequency = base_frequency, arquitecture = "linear_arquitecture")
+arquitecture = FourierAnsatz(n_qubits = n_qubits,n_inputs = n_inputs, n_layers = n_layers)
+#arquitecture = ConstantArquitecture(n_qubits = n_qubits,n_inputs = n_inputs, n_layers = n_layers)
+re_uploading_pqc = pqc.PQC(arquitecture = arquitecture)
+
+# Compilation
+loss = spvsd_loss
 re_uploading_pqc.compile(loss = loss)
 re_uploading_pqc.plot()
-print(re_uploading_pqc.n_layers)
 
 # Train
-x_ = x.reshape((N_points,1))
-y_ = y.reshape((N_points,1))
+x_ = jnp.array(x.reshape((N_points,1)))
+y_ = jnp.array(y.reshape((N_points,1)))
 metric_train_history, metric_test_history = re_uploading_pqc.fit(
                             x_,y_,x_,y_,
                             epochs = 300
@@ -56,7 +69,7 @@ y_predict = re_uploading_pqc.predict(x_)
 
 plt.plot(x_,y_,label = "Original")
 plt.plot(x,y_predict[:,0],label = "Approximation")
-plt.ylim(-1, 1)
+#plt.ylim(-1, 1)
 plt.xlabel("x")
 plt.ylabel("y")
 plt.legend()
