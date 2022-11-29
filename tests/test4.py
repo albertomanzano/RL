@@ -5,6 +5,7 @@
 import sys
 sys.path.append("./")
 sys.path.append("../")
+import time
 
 from jax import numpy as jnp
 import numpy as np
@@ -25,11 +26,11 @@ def cos_expansion(x,z):
 
 
 
-n = 3
+n = 4
 N = 2**n
 
 
-amplitude = np.random.randn(2**n)
+amplitude = np.abs(np.random.randn(2**n))
 amplitude[0] = 0
 amplitude = amplitude/np.sqrt(np.sum(np.square(amplitude)))
 phase = np.random.randn(2**n)
@@ -49,21 +50,24 @@ n_layers = 1
 
 arquitecture = FourierAnsatz(n_qubits = n_qubits,n_inputs = n_inputs, n_layers = n_layers)
 #arquitecture = ConstantArquitecture(n_qubits = n_qubits,n_inputs = n_inputs, n_layers = n_layers)
+start = time.time()
 re_uploading_pqc = pqc.PQC(arquitecture = arquitecture)
 
 # Compilation
 loss = spvsd_loss
-re_uploading_pqc.compile(loss = loss)
+re_uploading_pqc.compile(loss = loss, generator = z)
 re_uploading_pqc.plot()
 
 # Train
 x_ = jnp.array(x.reshape((N_points,1)))
 y_ = jnp.array(y.reshape((N_points,1)))
-metric_train_history, metric_test_history = re_uploading_pqc.fit(
-                            x_,y_,x_,y_,
-                            epochs = 300
-                            )
-
+#metric_train_history, metric_test_history = re_uploading_pqc.fit(
+#                            x_,y_,x_,y_,
+#                            epochs = 1
+#                            )
+#
+end = time.time()
+print("Time: ", end-start)
 # Evaluate
 y_predict = re_uploading_pqc.predict(x_)
 

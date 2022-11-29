@@ -246,7 +246,7 @@ class FourierAnsatz:
                 if i == 0:
                     qml.RZ(-angles_phase[1], wires = 0)
                 else:
-                    control_register = [j for j in range(0,i)]
+                    control_register = [j for j in range(i-1,-1,-1)]
                     multiplexor_rz_t(angles_phase[2**i:2**(i+1)],i,control_register = control_register,target_register = i)
                 
                 control_register = [j for j in range(i-1,-1,-1)]
