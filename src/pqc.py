@@ -75,14 +75,17 @@ class PQC:
 
         
         # History
-        self.metric_train_history = []
-        self.metric_test_history = []
+        self.metric_train_history = {}
+        self.metric_test_history = {}
+        for key in self.metrics:
+            self.metric_train_history[key] = []
+            self.metric_test_history[key] = []
         
         return None
 
     
 
-    def compute_metrics(self,x,y,lista):
+    def compute_metrics(self,x,y,dictionary):
         y_pred = self.call_map(self.arquitecture.weights,x)
 
         title = [ '{0: <25}'.format(str(i)) for i in range(y.shape[1]) ]
@@ -102,10 +105,11 @@ class PQC:
                 metric_string.append('{0: <25}'.format(str(result)))
 
             print('{0: <25}'.format(name)+''.join(metric_string))
-            epoch_list.append(metric_list)
+            dictionary[name].append(metric_list)
+            #epoch_list.append(metric_list)
 
         print("\n")
-        lista.append(epoch_list)
+        #lista.append(epoch_list)
 
         return None
      
@@ -159,8 +163,12 @@ class PQC:
             print("Test: ")
             self.compute_metrics(x_test,y_test,self.metric_test_history)
             print("#######################################################################")
+
+        for key in self.metrics:
+            self.metric_train_history[key] = np.array(self.metric_train_history[key])
+            self.metric_test_history[key] = np.array(self.metric_test_history[key])
             
-        return np.array(self.metric_train_history), np.array(self.metric_test_history)
+        return self.metric_train_history, self.metric_test_history
 
 
     def plot(self):

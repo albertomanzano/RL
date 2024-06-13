@@ -5,18 +5,26 @@ import jax.numpy as jnp
 import numpy as np
 from src.utils import expansion_to_pqc, multiplexor_rz_t, multiplexor_ry_t
 
-class ConstantPureCos:
+class HardwareEfficientAnsatz:
 
-    def __init__(self,n_inputs: int = 1,n_layers: int = 1,base_frequency: float = 1.):
+    def __init__(self,n_inputs: int = 1,n_qubits: int = 1,n_layers: int = 1,base_frequency: float = 1.,level: float = 1.):
         self.n_inputs = n_inputs
+        self.n_qubits = n_qubits
         self.n_layers = n_layers
         self.base_frequency = base_frequency
+        self.level = level
         self.weights = None
 
     def init_weights(self,generator = None):
         if generator is None:
             generator = jax.random.PRNGKey(int(time.time()))
-        self.weights = jax.random.uniform(generator,(self.n_inputs,self.n_layers))
+            self.weights = jax.random.uniform(generator,(self.n_inputs,self.n_qubits,self.n_layers))
+
+        #elif (type(generator) == type(jax.random.PRNGKey(0))):
+        #    self.weights = jax.random.uniform(generator,(self.n_inputs,self.n_qubits,self.n_layers))
+
+        else:
+            self.weights = generator
 
     def __call__(self,weights,x):
         """A variational quantum circuit representing the Universal classifier.
@@ -31,31 +39,35 @@ class ConstantPureCos:
 
         for l in range(self.n_layers):
             
-            # Variational layer
             for i in range(self.n_inputs):
-                qml.RX(weights[i,l],wires=i)
-            
-            # Encoding layer
-            for i in range(self.n_inputs):
-                qml.RY(self.base_frequency*x[i],wires=i)
+
+                # Variational layer
+                for j in range(self.n_qubits):
+                    qml.RX(weights[i,j,l],wires=i*self.n_qubits+j)
                 
+                # Encoding layer
+                for j in range(self.n_qubits):
+                    qml.RY(self.base_frequency*x[i],wires=i*self.n_qubits+j)
+                    
             # Entangling layer
-            for i in range(self.n_inputs-1):
-                qml.SWAP(wires = [i,i+1])
+            for i in range(self.n_qubits*self.n_inputs-1):
+                    qml.CNOT(wires = [i,i+1])
+            qml.CNOT(wires = [self.n_qubits*self.n_inputs-1,0])
 
         # Operator
-        if self.n_inputs == 1:
+        if (self.n_inputs == 1) and (self.n_qubits == 1):
             op = qml.PauliZ(wires = 0)
         else:
-            op = qml.prod(*[ qml.PauliZ(wires = i) for i in range(self.n_inputs) ])
-        return qml.expval(op)
+            op = qml.prod(*[ qml.PauliZ(wires = i) for i in range(self.n_qubits*self.n_inputs) ])
+        return qml.expval(self.level*op)
 
 class ConstantPureSin:
 
-    def __init__(self,n_inputs: int = 1,n_layers: int = 1,base_frequency: float = 1.):
+    def __init__(self,n_inputs: int = 1,n_layers: int = 1,base_frequency: float = 1.,level: float = 1.):
         self.n_inputs = n_inputs
         self.n_layers = n_layers
         self.base_frequency = base_frequency
+        self.level = level
         self.weights = None
 
     def init_weights(self,generator = None):
@@ -93,14 +105,15 @@ class ConstantPureSin:
             op = qml.PauliZ(wires = 0)
         else:
             op = qml.prod(*[ qml.PauliZ(wires = i) for i in range(self.n_inputs) ])
-        return qml.expval(op)
+        return qml.expval(self.level*op)
 
 class ConstantGeneral:
 
-    def __init__(self,n_inputs: int = 1,n_layers: int = 1,base_frequency: float = 1.):
+    def __init__(self,n_inputs: int = 1,n_layers: int = 1,base_frequency: float = 1.,level: float = 1.):
         self.n_inputs = n_inputs
         self.n_layers = n_layers
         self.base_frequency = base_frequency
+        self.level = level
         self.weights = None
 
     def init_weights(self,generator = None):
@@ -139,15 +152,16 @@ class ConstantGeneral:
             op = qml.PauliZ(wires = 0)
         else:
             op = qml.prod(*[ qml.PauliZ(wires = i) for i in range(self.n_inputs) ])
-        return qml.expval(op)
+        return qml.expval(self.level*op)
 
 class ConstantArquitecture:
 
-    def __init__(self,n_qubits: int = 1,n_inputs: int = 1, n_layers: int = 1,base_frequency: float = 1.):
+    def __init__(self,n_qubits: int = 1,n_inputs: int = 1, n_layers: int = 1,base_frequency: float = 1.,level: float = 1.):
         self.n_qubits = n_qubits
         self.n_inputs = n_inputs
         self.n_layers = n_layers
         self.base_frequency = base_frequency
+        self.level = level
         self.weights = None
 
     def init_weights(self,generator = None):
@@ -189,14 +203,15 @@ class ConstantArquitecture:
         # Operator
         #op = qml.prod(*[ qml.PauliY(wires = i) for i in range(self.n_inputs) ])
         op = qml.PauliY(wires = 0)
-        return qml.expval(op)
+        return qml.expval(self.level*op)
 
 class FourierAnsatz:
-    def __init__(self,n_qubits: int = 1,n_inputs: int = 1,n_layers: int = 1, base_frequency = 1., simulator: str = "default.qubit.jax"):
+    def __init__(self,n_qubits: int = 1,n_inputs: int = 1,n_layers: int = 1, base_frequency = 1., simulator: str = "default.qubit.jax",level: float = 1.):
         # Structure of the network
         self.n_qubits = n_qubits
         self.n_inputs = n_inputs
         self.base_frequency = base_frequency
+        self.level = level
         self.weights = None
         self.ob = None
         
@@ -260,39 +275,8 @@ class FourierAnsatz:
             ##########################################################
             qml.RZ(-angles_phase[0],wires = 0)
             qml.ctrl(qml.RY, [i for i in range(n-1)], control_values = [0 for i in range(n-1)])(-theta, wires=n-1)
-            return qml.expval(self.ob)
+            return qml.expval(self.level*self.ob)
     
 
 
 
-def linear_arquitecture(self,weights,x):
-    """A variational quantum circuit representing the Universal classifier.
-
-    Args:
-        params (array[float]): array of parameters
-        x (array[float]): single input vector
-
-    Returns:
-        float: fidelity between output state and input
-    """
-
-    for l in range(self.n_layers):
-        
-        # Variational layer
-        for i in range(self.n_inputs):
-            qml.Hadamard(wires = i)
-            qml.RY(weights[i,l],wires=i)
-        
-        # Encoding layer
-        for i in range(self.n_inputs):
-            qml.Hadamard(wires = i)
-            qml.RX(self.base_frequency*(l+1)*x[i],wires=i)
-            
-        # Entangling layer
-        for i in range(self.n_inputs-1):
-            qml.SWAP(wires = [i,i+1])
-
-    # Operator
-    #op = qml.prod(*[ qml.PauliY(wires = i) for i in range(self.n_inputs) ])
-    op = qml.PauliY(wires = 0)
-    return qml.expval(op)
